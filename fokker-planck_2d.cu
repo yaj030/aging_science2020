@@ -176,7 +176,7 @@ __global__  void flux(REAL *H, REAL *S, REAL *P, REAL *P1, sysvar* cu_Vars)
 
 	int idx=(blockIdx.y*gridDim.x+blockIdx.x)*blockDim.x+threadIdx.x;
 
-	REAL factor = 1500./15000;
+	REAL factor=St/15000;
 	if(idx>=0 && idx<NX)
 	{
 		h=H[idx];
@@ -232,9 +232,9 @@ __global__  void flux(REAL *H, REAL *S, REAL *P, REAL *P1, sysvar* cu_Vars)
 			Dsm=P[j-1+N*i]-P[j+N*i];
                 }
 
-           P1[idx]=P[idx]-Ahp+Ahm-Asp+Asm+Df*(Dhp+Dhm+Dsp+Dsm);
-           //P1[idx]=P[idx]+Df*(Dhp+Dhm+Dsp+Dsm);
-           //P1[idx]=P[idx]-Asp+Asm;
+           //P1[idx]=P[idx]-Ahp+Ahm-Asp+Asm+Df*(Dhp+Dhm+Dsp+Dsm);
+           P1[idx]=P[idx]-Ahp+Ahm-Asp+Asm+Df*(Dhp+Dhm)+0.01*Df*(Dsp+Dsm);
+	   if(P1[idx]<0) P1[idx]=0;
     }
 };
 
@@ -263,7 +263,7 @@ __global__ void copy_P(REAL *n, REAL *na)
 //---------------------------------------------------------------------------
 //---------------------------------------------------------------------------
 
-int main()
+int main(int argc, char** argv)
 {
     dim3 dGRID,dBLOCK;
     int GPUID=0;
@@ -290,12 +290,12 @@ int main()
     double qx[N],qy[N],qsq;
     string ext;  // for file I/O
     string file;
-    char datname[200],filename[200];
+    char datname[200],filename[200],comd[200];
     int steps,interval,zahl; 
 
     REAL dx;	//dx=L/N
     double dkx,scale=N*N;
-    int i,j,k;
+    int i,j,k,k0;
 
     double tim=0.,timestart=0.0;
 
@@ -411,24 +411,17 @@ int main()
         steps=dFIP[15];
         interval=dFIP[16];
 
+
+        fin.getline(trashbuffer, iNTRASH);
+
+        fin.close();
+
  //	LX=2*NX; //system size
  	LX=15000; //system size
         dx=LX/N;
         dkx=2.*M_PI/LX;
         REAL coef=1./2./dx;
 	Df=D*dt/dx/dx;
-
-        k1=coef*k1;
-        k2=coef*k2;
-        k3=coef*k3;
-        k4=coef*k4;
-        k5=coef*k5;
-        k6=coef*k6;
-
-        fin.getline(trashbuffer, iNTRASH);
-
-        fin.close();
-
 
 
         cerr << "k1: \t" << k1 << "\n";
@@ -451,6 +444,13 @@ int main()
         cerr << "interval: \t" << interval << "\n";
 
 
+
+        k1=coef*k1;
+        k2=coef*k2;
+        k3=coef*k3;
+        k4=coef*k4;
+        k5=coef*k5;
+        k6=coef*k6;
 
 
   //  sysvar sv_Vars [NX];
@@ -510,7 +510,23 @@ int main()
 
     //new simulation
 
-        // initial conditions mark
+        for(i=0; i<N; i++)
+       	for(j=0; j<N; j++)
+	{
+        	H[j+N*i]=dx*i;
+        	S[j+N*i]=dx*j;
+        }
+
+// initial conditions mark
+
+int NEW;
+if(argc<2)
+    NEW=1;
+else
+    NEW=0;
+
+if(NEW==1){
+        k0=0;
         for(i=0; i<N; i++)
           for(i=0; i<N; i++){
         	P[j+N*i]=0; 
@@ -520,24 +536,45 @@ int main()
 	}
 
 
- 	REAL W=5000;
+ 	REAL W=2000;
 	totP=0;
         for(i=0; i<N; i++)
         	for(j=0; j<N; j++)
             {
-        REAL arg1=dx*(i-N/2.)/W;
-        REAL arg2=dx*(j-N/2.)/W;
-        P[j+N*i]=exp(-(arg1*arg1+arg2*arg2));
+		REAL arg1=dx*(i-1.*N/4.)/W;
+		REAL arg2=dx*(j-N/4.)/W;
+		P[j+N*i]=exp(-(arg1*arg1+arg2*arg2));
 
-        totP+=P[j+N*i] ;
-        H[j+N*i]=dx*i;
-        S[j+N*i]=dx*j;
-        realdummy[j+N*i] = 0.;
-	complexdummy[j+N*i].re = 0.;
-	complexdummy[j+N*i].im = 0.;
+		totP+=P[j+N*i] ;
+		realdummy[j+N*i] = 0.;
+		complexdummy[j+N*i].re = 0.;
+		complexdummy[j+N*i].im = 0.;
             }
 
         cout << "initial totP:" <<  "\t" << totP  <<endl;
+}
+else
+{
+ifstream fin1("last_snapshot.dat");
+
+        if (!fin1.good()) {
+                cerr << "Cannot find last_snapshot.dat" << endl;
+                return 1;
+        } // if
+
+                i = 0;
+                fin1 >> k0;
+                fin1.getline(trashbuffer, iNTRASH);
+        while ((i < NX) && (fin.good())) {
+                fin1 >> P[i];
+                fin1.getline(trashbuffer, iNTRASH);
+                i++;
+                totP+=P[i] ;
+        } // while
+        fin1.close();
+        cout << "initial totP:" <<  "\t" << totP  <<endl;
+
+}
 
 
 
@@ -626,7 +663,7 @@ int main()
 int iout=0;
 //timestep
 //--------------------------------------------------------------------------------------
-    for(k=0; k<steps+1; k++)
+    for(k=k0; k<steps+1; k++)
     {
 
         tim+=dt;
@@ -660,10 +697,26 @@ int iout=0;
             {
                     outsr // << i*dx 
                           << "\t" << P[i]
-                          << "\t" << R[i]
+                      //    << "\t" << R[i]
                           << endl;
             }
             outsr.close();
+
+            system("rm -f last_snapshot.dat");
+            file="last_snapshot.dat";
+            strcpy(filename,file.c_str());              //copy to cstring
+            outsr.open (filename, ofstream::out );
+                    outsr << k << endl;
+/*
+            for(i=0; i<NX; i++)
+            {
+                    outsr << P[i] << endl;
+            }
+*/
+            outsr.close();
+
+            sprintf(comd,"cat %s >> last_snapshot.dat",datname);
+            system(comd);
 
         totP=0;
 	minP=1000;
